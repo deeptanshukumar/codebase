@@ -1,0 +1,208 @@
+yes, i was going to tell you what to do next, firslty. 
+i was running all this on a gpu on colab t4 but we will be "inferencing" this whole pipeline on a mac mini or this laptop on a cpu. i think inferencing to get answer shouldnt take that long (evaulation does, telling from my exp) 
+so basically the whole thing will be running on the computer. if you have any doubts about it then you can look up on the inetrnet
+
+secndonly i want to make this a rule, there is a file called "changestocodebase.md"
+WHENEVER you make changes to the files and folders like artifacts, scripts, src, tests, make sure to write about it in this file
+
+and lastly heres a spec of what you have to implement
+
+Point 1: System Architecture & State Management (The Foundation)
+
+Prompt Context for Claude: "We are building a Streamlit web application that serves as an interactive demo for a mechanistic interpretability ML paper (dynamic LLM steering). The app will run locally on a Mac Mini (CPU) and interface with a quantized Llama-3.2-3B model and custom PyTorch steering classes. The primary challenge is preventing Streamlit's execution model from reloading the 3GB model and the steering vectors on every UI interaction."
+
+Technical Specifications:
+
+    File Structure:
+
+        app.py: The main Streamlit frontend application.
+
+        contextfocus_backend.py: A refactored version of our Jupyter notebook containing the PyTorch logic, ModelBundle, BCILS selector, and budgeted_latent_activation_search.
+
+        vectors/: The directory containing the pre-calculated layer_xxx.pt steering vectors.
+
+    Resource Caching (@st.cache_resource):
+
+        The model, tokenizer, and vector loading must be wrapped in @st.cache_resource.
+
+        Define a function load_ml_environment() in app.py that initializes the HuggingFace model using BitsAndBytesConfig (4-bit) and loads the layer vectors into memory once.
+
+        Crucial: Pass show_spinner="Loading Llama-3.2-3B into memory..." to the cache decorator so the audience knows the system is warming up during the initial boot.
+
+    Session State Management (st.session_state):
+
+        Initialize the following state variables on startup:
+
+            st.session_state.sandbox_history: A list of dictionaries [{"query": "...", "base_ans": "...", "steered_ans": "...", "metrics": {...}}] to persist the side-by-side A/B test results.
+
+            st.session_state.rag_context: A string holding the currently extracted chunk from the uploaded PDF.
+
+            st.session_state.system_warmed_up: Boolean flag to unlock the UI only after models are loaded.
+
+    Backend Integration Strategy:
+
+        The Streamlit app will import the budgeted_latent_activation_search function directly.
+
+        Because inference on a Mac Mini CPU will take 10-30 seconds, all generation calls must be wrapped in with st.spinner('Calculating causal gradients and generating...') to prevent the user from clicking buttons multiple times while the event loop is blocked.
+
+
+Point 2: UI Layout & The "Sandbox" (A/B Testing Interface)
+
+Prompt Context for Claude/Cursor: "The application needs a clean, wide-layout UI. The core feature is a 'Sandbox' where users can input custom contradictory context and a query to see a side-by-side comparison of the base model versus the steered model. We need to handle Streamlit's widget states carefully so the generated text doesn't vanish when the user uploads a file later."
+
+Technical Specifications:
+
+    Page Configuration & Header:
+
+        Initialize the app with st.set_page_config(page_title="Context X-Ray", layout="wide").
+
+        Include a strong title and a brief markdown description explaining that this runs a 4-bit Llama-3.2-3B model with inference-time BCILS layer selection.
+
+    The Input Form (st.form or Container):
+
+        Use st.text_area for "Inject Custom Context" (Default: "The sky is made of green cheese.").
+
+        Use st.text_input for "Ask a Question" (Default: "What is the sky made of?").
+
+        Include a st.button labeled "Run Context Intervention".
+
+        Crucial: When this button is pressed, trigger the cached budgeted_latent_activation_search function twice: once with an empty context (to get the Baseline) and once with the user's context (to get the Steered output).
+
+    Side-by-Side Output (st.columns):
+
+        Create two columns: col1, col2 = st.columns(2).
+
+        Left Column (Baseline): Header "Base Model (Parametric Memory)". Display the generated text inside an st.info or st.container box with a distinct background color (e.g., light red/gray) to indicate it ignored the context.
+
+        Right Column (Steered): Header "Steered Model (BCILS Active)". Display the text inside a success box (st.success or light green) to highlight that the model faithfully followed the injected context.
+
+    History Persistence:
+
+        After generation, append the inputs, baseline output, and steered output as a dictionary to st.session_state.sandbox_history.
+
+        Render the most recent result at the top, and optionally iterate through st.session_state.sandbox_history[::-1] to show previous experiments below it within st.expander widgets.
+
+Tell me "next" when you are ready for Point 3: Under-the-Hood Metrics (Visualizing the Math).
+
+Point 3: Simplified Metrics Display (Attached to Sandbox)
+
+Prompt Context for Claude/Cursor: "Directly beneath the side-by-side generation outputs in the Sandbox, we need a clean, non-technical metrics display. We are stripping out the complex math. We only want to show if the JS Divergence filter triggered and which layer was selected."
+
+Technical Specifications:
+
+    Placement: * After rendering the col1 (Baseline) and col2 (Steered) text outputs, create a new full-width container or use st.columns(2) again just for the metrics.
+
+    The Metrics:
+
+        Use st.metric or styled markdown boxes.
+
+        Metric 1 (Conflict Detection): Check the result['used_search'] boolean from the backend output.
+
+            If True: Display "⚠️ Conflict Detected (JSD Gating: Active)".
+
+            If False: Display "✅ No Conflict (JSD Gating: Bypassed)".
+
+        Metric 2 (Intervention Layer): Check result['layer'].
+
+            Display: "Intervention Layer: {layer_number}" (e.g., Layer 14). If no search was used, display "N/A".
+
+    Visual Styling: Wrap these metrics in a subtle st.container(border=True) so they look like a clean status bar attached to the bottom of the generation results.
+
+Point 4: The RAG Playground
+
+Prompt Context for Claude/Cursor: "We need a dedicated section for Retrieval-Augmented Generation (RAG). The user will upload a PDF, ask a question, and the system will retrieve a text chunk and feed it into the BCILS steering pipeline."
+
+Technical Specifications:
+
+    Document Upload (Sidebar):
+
+        Add st.sidebar.file_uploader("Upload a PDF document", type=["pdf"]).
+
+        When a file is uploaded, use PyPDF2 (or pdfplumber) to extract the text.
+
+        Split the text into simple chunks (e.g., split by double newlines \n\n or chunks of 500 characters). Store these chunks in st.session_state.pdf_chunks.
+
+    RAG Interface (Main Page):
+
+        Below the Sandbox section, add a divider (st.divider()) and a header: "RAG Playground".
+
+        Add an st.text_input for the user to ask a question about their uploaded document.
+
+        Add a "Search & Answer" st.button.
+
+    Lightweight Retrieval:
+
+        Since this runs locally on a Mac Mini CPU, avoid heavy embedding models. Implement a fast, lightweight retrieval function using TF-IDF (via sklearn.feature_extraction.text.TfidfVectorizer) or simple Jaccard similarity (word overlap) to find the single chunk that best matches the user's question.
+
+    Execution & Display:
+
+        Once the best chunk is retrieved, display it inside an st.expander("View Retrieved Context", expanded=False).
+
+        Pass the user's question and this retrieved chunk into the budgeted_latent_activation_search function (with use_bplis=True enabled).
+
+        Output the final generated text in a large success box, proving the model adhered to the retrieved PDF chunk.
+
+Point 5: The Backend Wrapper & Integration (contextfocus_backend.py)
+
+Prompt Context for Claude/Cursor: "To keep the Streamlit app (app.py) clean, we need to extract all the heavy PyTorch logic, class definitions, and the budgeted_latent_activation_search pipeline from our Jupyter notebook into a dedicated backend module named contextfocus_backend.py. Streamlit will import functions from this file to execute the ML tasks."
+
+Technical Specifications:
+
+    Extraction & Cleanup:
+
+        Move the following classes and functions from the provided notebook into contextfocus_backend.py: ModelBundle, InfluenceLayerSelector, LatentInterventionSearch, HouseholderSteerer, ActivationSteerer, detect_conflict, and budgeted_latent_activation_search.
+
+        Ensure all necessary imports (Torch, Transformers, CMA, Scipy) are at the top of this backend file.
+
+    The Initialization Wrapper (load_environment):
+
+        Create a function def load_environment(model_name: str, vectors_dir: str): inside the backend file.
+
+        This function must handle the 4-bit BitsAndBytesConfig quantization and tokenizer instantiation.
+
+        Crucial for Mac Mini: If the user is running on Apple Silicon, ensure the device mapping handles fallback correctly (though 4-bit BNB natively expects CUDA, ensure the device_map="auto" or CPU offloading is explicitly managed if CUDA is unavailable).
+
+        Return the populated ModelBundle object.
+
+    The Execution Wrapper (run_inference):
+
+        Create a clean API function for Streamlit to call: def run_inference(bundle: ModelBundle, vectors_dir: str, question: str, context: str, use_bplis: bool):
+
+        Inside this function, instantiate the SearchConfig.
+
+        Call budgeted_latent_activation_search with the provided parameters.
+
+        Return a standardized dictionary containing:
+
+            base_text: (You will need to do a quick vanilla model.generate pass here to get the baseline string to return alongside the steered string).
+
+            steered_text: The text output from the search pipeline.
+
+            conflict_detected: Boolean based on used_search.
+
+            intervention_layer: The layer chosen by BCILS.
+
+    Stitching in app.py:
+
+        At the very top of app.py, use:
+        Python
+
+        import streamlit as st
+        from contextfocus_backend import load_environment, run_inference
+
+        Wrap the loader in Streamlit's cache:
+        Python
+
+        @st.cache_resource(show_spinner="Loading 3B Model & Vectors...")
+        def initialize_system():
+            return load_environment("meta-llama/Llama-3.2-3B-Instruct", "./vectors")
+
+        bundle = initialize_system()
+
+        When the user clicks "Run Context Intervention" or "Search & Answer" in the RAG pipeline, call run_inference(bundle, ...) and unpack the returned dictionary to populate the UI elements defined in Points 2, 3, and 4.
+
+"Please write the complete app.py and contextfocus_backend.py files based on these 5 architectural points and the provided Jupyter Notebook. Ensure the Streamlit UI matches the 'Axiom' spec perfectly."
+
+the name is "Axiom"
+
+also i want you to structure it out properly, log implementation, make todos and then do it, for something you dont know, refer google web search

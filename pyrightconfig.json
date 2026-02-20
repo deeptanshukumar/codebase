@@ -1,0 +1,19 @@
+{
+  "include": [
+    "src",
+    "app.py",
+    "contextfocus_backend.py",
+    "scripts"
+  ],
+  "extraPaths": [
+    "src",
+    "."
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.11",
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none",
+  "reportOptionalMemberAccess": "none",
+  "useLibraryCodeForTypes": true
+}
